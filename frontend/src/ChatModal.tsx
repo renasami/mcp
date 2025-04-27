@@ -14,7 +14,7 @@ export const ChatModal = () => {
 
   const chat = useMutation({
     mutationFn: postChat,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["todos"] }),
+    onSuccess: async () => await qc.invalidateQueries({ queryKey: ["todos"] }),
   });
 
   const onSubmit = handleSubmit(async ({ message }) => {
@@ -23,6 +23,7 @@ export const ChatModal = () => {
       const reply = await chat.mutateAsync(message);
 
       setHistory((h) => [...h, { from: "Bot", text: reply }]);
+      await qc.invalidateQueries({ queryKey: ["todos"] });
     } catch (e: any) {
       setHistory((h) => [...h, { from: "Bot", text: `Error: ${e.message}` }]);
     }

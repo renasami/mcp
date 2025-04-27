@@ -48,6 +48,7 @@ app.post("/chat", async (ctx) => {
     // 日本語コマンド判定
     if (cmd === "todo") {
       const sub = parts[1];
+
       // 一覧取得
       if (sub === "一覧") {
         const todos = await mcpClient.callTool<{ text: string }[]>(
@@ -74,7 +75,10 @@ app.post("/chat", async (ctx) => {
           { title }
         );
         console.log(created);
-        return ctx.json({ created: JSON.parse(created[0].text) });
+
+        return ctx.json({
+          value: `了解しました。「${title}」という名前のタスクを作成します。`,
+        });
       }
       // 更新
       if (sub === "更新" && parts[2] && parts[3]) {

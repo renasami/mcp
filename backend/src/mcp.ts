@@ -7,89 +7,80 @@ import { v4 } from "uuid";
 import { string, z } from "zod";
 import { getAll, getBy } from "./services/getTodo";
 import { createTodo } from "./services/createTodo";
-import { deleteTodo } from "./services/deleteTodo";
 import { updateTodo } from "./services/updateTodo";
+import { deleteTodo } from "./services/deleteTodo";
 
-// 1. MCP サーバーとツール登録
 const mcp = new McpServer({ name: "TodoService", version: "1.0.0" });
-mcp.tool("listTodos", async () => ({
-  content: Array.from(getAll().values()).map((t) => ({
-    type: "text" as const,
-    text: JSON.stringify(t),
-  })),
-}));
-mcp.tool("getTodo", { id: z.string() }, async ({ id }) => {
-  const todo = getBy(id);
-  if (!todo) throw new Error(`ToDo(${id}) not found`);
-  return { content: [{ type: "text" as const, text: JSON.stringify(todo) }] };
-});
 
+// ツール登録（isErr() 呼び出しに注意）
 mcp.tool("createTodo", { title: z.string() }, async ({ title }) => {
+  console.log("createTodo:", title);
   const res = createTodo(title);
   if (res.isErr) throw new Error(res.value);
   return {
     content: [{ type: "text" as const, text: JSON.stringify(res.value) }],
   };
 });
-mcp.tool(
-  "updateTodo",
-  { id: z.string(), title: z.string(), done: z.boolean() },
-  async ({ id, title, done }) => {
-    const res = updateTodo(id, title, done);
-    if (res.isErr) throw new Error(res.value);
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(res.value) }],
-    };
-  }
-);
-mcp.tool("deleteTodo", { id: z.string() }, async ({ id }) => {
-  const res = deleteTodo(id);
-  if (res.isErr) throw new Error(res.value);
-  return { content: [{ type: "text" as const, text: `Deleted ${id}` }] };
-});
+// …他ツールも同様に…
 
-// 2. transports ストア
 const transports: Record<string, StreamableHTTPServerTransport> = {};
 
-// 3. HTTP サーバー起動
 const server = http.createServer(async (req, res) => {
   if (req.url !== "/mcp") {
     res.writeHead(404).end();
     return;
   }
 
-  // ボディをパース
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const body = JSON.parse(Buffer.concat(chunks).toString());
+  // 初期化 or POST(JSON-RPC)
+  if (req.method === "POST") {
+    const buf: Uint8Array[] = [];
+    for await (const chunk of req) buf.push(chunk);
+    let body: any;
+    try {
+      body = JSON.parse(Buffer.concat(buf).toString());
+    } catch {
+      res.writeHead(400).end("Invalid JSON");
+      return;
+    }
 
-  // セッションIDヘッダ
-  const sidHeader = req.headers["mcp-session-id"] as string | undefined;
-  let transport = sidHeader && transports[sidHeader];
+    const sidHeader = req.headers["mcp-session-id"] as string | undefined;
+    let transport = sidHeader && transports[sidHeader];
 
-  // 初期化リクエストなら新規作成
-  if (!transport && isInitializeRequest(body)) {
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => v4(),
-      eventStore: new InMemoryEventStore(),
-      onsessioninitialized: (sid: string) => {
-        transports[sid] = transport!;
-      },
-    });
-    transport.onclose = () => {
-      delete transports[transport!.sessionId!];
-    };
-    await mcp.connect(transport);
-  }
+    if (!transport && isInitializeRequest(body)) {
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => v4(),
+        eventStore: new InMemoryEventStore(),
+        onsessioninitialized: (sid: string) => {
+          transports[sid] = transport!;
+        },
+      });
 
-  // transport がないならエラー
-  if (!transport) {
-    res.writeHead(400).end(JSON.stringify({ error: "Bad Request" }));
+      transport.onclose = () => delete transports[transport!.sessionId!];
+      await mcp.connect(transport);
+    }
+    if (!transport) {
+      res.writeHead(400).end("Bad Request");
+      return;
+    }
+
+    await transport.handleRequest(req, res, body);
     return;
   }
 
-  // 1回だけ handleRequest を呼ぶ
-  await transport.handleRequest(req, res, body);
+  // SSE stream (GET) or session-terminate (DELETE)
+  if (req.method === "GET" || req.method === "DELETE") {
+    const sid = req.headers["mcp-session-id"] as string | undefined;
+    const transport = sid && transports[sid];
+    if (!transport) {
+      res.writeHead(400).end("Invalid session");
+      return;
+    }
+    await transport.handleRequest(req, res);
+    return;
+  }
+
+  // その他は許可しない
+  res.writeHead(405).end("Method Not Allowed");
 });
 
 export default server;
