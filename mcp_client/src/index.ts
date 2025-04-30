@@ -104,15 +104,18 @@ app.post("/chat", async (ctx) => {
       }
 
       // コマンド不正
-      return ctx.text(
-        "不明な todo コマンドです。\n" +
-          "使い方：\n" +
-          "  todo 一覧\n" +
-          "  todo 取得 <ID>\n" +
-          "  todo 作成 <タイトル>\n" +
-          "  todo 更新 <ID> <完了|未完了> [新タイトル]\n" +
-          "  todo 削除 <ID>",
-        400
+      return ctx.json(
+        {
+          value:
+            "不明な todo コマンドです。\n" +
+            "使い方：\n" +
+            "  todo 一覧\n" +
+            "  todo 取得 <ID>\n" +
+            "  todo 作成 <タイトル>\n" +
+            "  todo 更新 <ID> <完了|未完了> [新タイトル]\n" +
+            "  todo 削除 <ID>",
+        },
+        200
       );
     }
 
